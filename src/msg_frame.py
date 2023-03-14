@@ -1,12 +1,11 @@
 
 import pickle
 from typing import Callable, Any
-from struct import pack, unpack
 import zlib
 import hashlib
 
-PACKING_FORMAT = '>4sI' # 4 bytes for the header type and 4 bytes for the header length
-MSG_COMMAND = b'MSG\0'
+class ChecksumError(Exception):
+    pass
 
 class MSG_Header():
     def __init__(self):
@@ -71,22 +70,18 @@ class MSG_Frame():
 
         self.bin_msg = bin_msg
         self.bin_header = header.pack()
-        self.bin_header_len = pack('>4sI', MSG_COMMAND, len(self.bin_header))        # we need to add a raw message so reciver can trust the header length
+        self.bin_header_len = len(self.bin_header)
+
+    def unpack_header(self) -> MSG_Header:
+        # check the header length
+        if len(self.bin_header) != self.bin_header_len:
+            raise ValueError('Invalid message header length')
+
+        return MSG_Header.unpack(self.bin_header)
 
 
     def unpack(self, crypt_fn:Callable=None) -> Any:
-        # get length of the header
-        command, header_len = unpack('>4sI', self.bin_header_len)
-
-        if command != MSG_COMMAND:
-            raise ValueError('Invalid message frame')
-
-        # check the header length
-        if len(self.bin_header) != header_len:
-            raise ValueError('Invalid message header length')
-        
-        # unpack the header
-        header = MSG_Header.unpack(self.bin_header)
+        header = self.unpack_header()
 
         # check the checksum
         MSG_Frame.check_checksum(header.checksum_type, self.bin_msg, header.checksum)
@@ -125,5 +120,5 @@ class MSG_Frame():
     def check_checksum(check_type:str, data:bytes, check:str) -> None:
         data_check = MSG_Frame.get_checksum(data, check_type)
         if data_check != check:
-            raise ValueError('Invalid checksum')
+            raise ChecksumError('Invalid checksum')
         
