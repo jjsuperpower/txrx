@@ -62,7 +62,6 @@ class Connection():
         bytes_left = total_size
 
         while bytes_left >= self._recv_chunk_size:
-            print(f'bytes left: {bytes_left}')
             chunk = connection.recv(self._recv_chunk_size)
             if not chunk:
                 logging.error('Connection Error, could not receive message')
