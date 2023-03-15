@@ -10,10 +10,19 @@ from defines import *
 
 
 class Connection():
-    def __init__(self, host:str, port:int, max_retry:int=5, protocol:str='tcp', compression:int=0, use_encryption:bool=False, _recv_chunk_size:int=4096):
+    def __init__(self, 
+                 host:str, 
+                 port:int, 
+                 max_retry:int=5, 
+                 protocol:str='tcp', 
+                 compression:int=0, 
+                 auto_reconnect:bool=False,
+                 use_encryption:bool=False, 
+                 _recv_chunk_size:int=4096):
         self.host = host
         self.port = port
         
+        self.auto_reconnect = auto_reconnect
         self._recv_chunk_size = _recv_chunk_size
         self.protocol = protocol
         self.max_retry = max_retry
@@ -146,7 +155,22 @@ class Server(Connection):
             raise ValueError('Invalid address')
 
         msg_frame = MSG_Frame(msg)
-        self._send(self.clients[addr], msg_frame)
+        success = False
+        
+        while not success:
+            try:
+                self._send(self.clients[addr], msg_frame)
+            except Exception as e:
+                if self.auto_reconnect:
+                    logging.info('Reconnecting to client, address: {addr}')
+                    self.close_connection(addr)
+                    while self.clients.get(addr) is None:
+                        self.wait_for_connection(1)
+                    continue
+                else:
+                    raise e
+            success = True
+            
 
     def send_all(self, msg:MSG_Frame):
         for addr, connect in self.clients.items():
@@ -157,7 +181,23 @@ class Server(Connection):
             logging.error(f'Invalid address: {addr}')
             raise ValueError('Invalid address')
 
-        msg = self._recv(self.clients[addr])
+        success = False
+        
+        while not success:
+            try:
+                msg = self._recv(self.clients[addr])
+            except Exception as e:
+                if self.auto_reconnect:
+                    logging.info('Reconnecting to client, address: {addr}')
+                    self.close_connection(addr)
+                    while self.clients.get(addr) is None:
+                        self.wait_for_connection(1)
+                    continue
+                else:
+                    raise e
+                
+            success = True
+
         return msg
     
     def recv_all(self) -> dict:
@@ -225,10 +265,40 @@ class Client(Connection):
 
     def send(self, msg:Any):
         msg_frame = MSG_Frame(msg)
-        self._send(self.socket, msg_frame)
+        success = False
+
+        while not success:
+            try:
+                self._send(self.socket, msg_frame)
+            except Exception as e:
+                if self.auto_reconnect:
+                    logging.info('Resetting connection')
+                    self.disconnect()
+                    self.connect()
+                    logging.info('Reconnected to server')
+                    continue
+                else:
+                    raise e
+            success = True
+
 
     def recv(self) -> Any:
-        msg = self._recv(self.socket)
+        success = False
+
+        while not success:
+            try:
+                msg = self._recv(self.socket)
+            except Exception as e:
+                if self.auto_reconnect:
+                    logging.info('Resetting connection')
+                    self.disconnect()
+                    self.connect()
+                    logging.info('Reconnected to server')
+                    continue
+                else:
+                    raise e
+            success = True
+
         return msg
     
     def disconnect(self):
