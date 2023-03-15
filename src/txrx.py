@@ -2,8 +2,12 @@ import socket
 import logging
 from time import sleep
 from struct import pack, unpack
-from typing import Any
-import sys
+from typing import Any, Callable
+
+from Crypto.Cipher import AES
+from hashlib import sha256
+
+logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
 
 from msg_frame import MSG_Frame, ChecksumError
 from defines import *
@@ -15,31 +19,30 @@ class Connection():
                  port:int, 
                  max_retry:int=5, 
                  protocol:str='tcp', 
+                 checksum:str='crc32',
                  compression:int=0, 
                  auto_reconnect:bool=False,
-                 use_encryption:bool=False, 
+                 crypt_key:str=None, 
                  _recv_chunk_size:int=4096):
         self.host = host
         self.port = port
         
+        self.crypt_key = crypt_key
+        self.checksum = checksum
         self.auto_reconnect = auto_reconnect
         self._recv_chunk_size = _recv_chunk_size
         self.protocol = protocol
         self.max_retry = max_retry
-        self.compression = compression
-        self.use_encryption = use_encryption
+        self.compression = compression       
 
-    def _send(self, connection:socket.socket, msg:MSG_Frame):
-        if not isinstance(msg, MSG_Frame):
-            logging.error('Invalid message type, needs to be a MSG_Frame')
-            raise TypeError('Invalid message type')
+    def _send(self, connection:socket.socket, msg:Any):
+        msg = MSG_Frame(msg, crypt_key=self.crypt_key)
         
-        if msg.bin_header_len is None:
-            try:
-                msg.pack()
-            except Exception as e:
-                logging.error(f'Error packing message: {e}')
-                raise e
+        try:
+            msg.pack(checksum=self.checksum, compression=self.compression)
+        except Exception as e:
+            logging.error(f'Error packing message: {e}')
+            raise e
 
         cmd_header = pack(PACKING_FORMAT, MSG_COMMAND, msg.bin_header_len)
 
@@ -88,6 +91,7 @@ class Connection():
         return data
 
     def _recv(self, connection:socket.socket) -> MSG_Frame:
+        msg = None
         for _ in range(self.max_retry):
 
             cmd_header = connection.recv(CMD_LEN)
@@ -97,7 +101,7 @@ class Connection():
                 logging.error('Invalid command header')
                 raise ValueError('Invalid command header')
             
-            rx_msg = MSG_Frame(None)
+            rx_msg = MSG_Frame(None, crypt_key=self.crypt_key)
 
             rx_msg.bin_header_len = header_len
             rx_msg.bin_header = connection.recv(header_len)
@@ -154,22 +158,20 @@ class Server(Connection):
             logging.error(f'Invalid address: {addr}')
             raise ValueError('Invalid address')
 
-        msg_frame = MSG_Frame(msg)
         success = False
         
-        while not success:
+        while True:
             try:
-                self._send(self.clients[addr], msg_frame)
+                self._send(self.clients[addr], msg)
+                return
             except Exception as e:
                 if self.auto_reconnect:
                     logging.info('Reconnecting to client, address: {addr}')
                     self.close_connection(addr)
                     while self.clients.get(addr) is None:
                         self.wait_for_connection(1)
-                    continue
                 else:
                     raise e
-            success = True
             
 
     def send_all(self, msg:MSG_Frame):
@@ -180,25 +182,21 @@ class Server(Connection):
         if addr not in self.clients:
             logging.error(f'Invalid address: {addr}')
             raise ValueError('Invalid address')
-
-        success = False
         
-        while not success:
+        while True:
             try:
                 msg = self._recv(self.clients[addr])
+                return msg
             except Exception as e:
                 if self.auto_reconnect:
                     logging.info('Reconnecting to client, address: {addr}')
                     self.close_connection(addr)
                     while self.clients.get(addr) is None:
                         self.wait_for_connection(1)
-                    continue
                 else:
                     raise e
                 
-            success = True
 
-        return msg
     
     def recv_all(self) -> dict:
         msgs = {}
@@ -264,30 +262,29 @@ class Client(Connection):
                     sleep(1)
 
     def send(self, msg:Any):
-        msg_frame = MSG_Frame(msg)
         success = False
 
-        while not success:
+        while True:
             try:
-                self._send(self.socket, msg_frame)
+                self._send(self.socket, msg)
+                return
             except Exception as e:
                 if self.auto_reconnect:
                     logging.info('Resetting connection')
                     self.disconnect()
                     self.connect()
                     logging.info('Reconnected to server')
-                    continue
                 else:
                     raise e
-            success = True
 
 
     def recv(self) -> Any:
         success = False
 
-        while not success:
+        while True:
             try:
                 msg = self._recv(self.socket)
+                return msg
             except Exception as e:
                 if self.auto_reconnect:
                     logging.info('Resetting connection')
@@ -297,9 +294,7 @@ class Client(Connection):
                     continue
                 else:
                     raise e
-            success = True
 
-        return msg
     
     def disconnect(self):
         self.socket.close()

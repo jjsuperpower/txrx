@@ -1,6 +1,8 @@
 
 import pickle
 from typing import Callable, Any
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
 import zlib
 import hashlib
 
@@ -35,7 +37,7 @@ class MSG_Frame():
     Attributes:
     
     '''
-    def __init__(self, msg:Any) -> None:
+    def __init__(self, msg:Any, crypt_key:str=None) -> None:
         '''Constructor for the MSG_Frame class
         '''
 
@@ -44,10 +46,20 @@ class MSG_Frame():
         self.bin_msg = None
         self.msg = msg
 
+        if crypt_key:
+            self.en_cipher = self._get_crypto_fn(crypt_key)
+            self.de_cipher = self._get_crypto_fn(crypt_key)
+            self.use_encryption = True
+        else:
+            self.use_encryption = False
+
+
+    def _get_crypto_fn(self, key:str) -> Callable:
+        crypt_key = hashlib.sha256(key.encode()).digest()
+        return AES.new(crypt_key, AES.MODE_EAX, crypt_key[:16])
 
     def pack(self, 
             checksum:str='crc32',
-            crypt_fn:Callable=None,
             compression:int=0,
             ) -> None:
 
@@ -56,14 +68,14 @@ class MSG_Frame():
         if compression > 0:
             bin_msg = zlib.compress(bin_msg, compression)
 
-        if crypt_fn:
-            bin_msg = crypt_fn.encrypt(bin_msg)
+        if self.use_encryption:
+            bin_msg = self.en_cipher.encrypt(pad(bin_msg, AES.block_size))
 
         msg_check = MSG_Frame.get_checksum(bin_msg, checksum)
 
         header = MSG_Header()
         header.data_len = len(bin_msg)
-        header.encrypted = True if crypt_fn else False
+        header.encrypted = self.use_encryption
         header.compression = compression
         header.checksum_type = checksum
         header.checksum = msg_check
@@ -80,7 +92,7 @@ class MSG_Frame():
         return MSG_Header.unpack(self.bin_header)
 
 
-    def unpack(self, crypt_fn:Callable=None) -> Any:
+    def unpack(self) -> Any:
         header = self.unpack_header()
 
         # check the checksum
@@ -90,7 +102,7 @@ class MSG_Frame():
 
         # decrypt the message
         if header.encrypted:
-            bin_msg = crypt_fn.decrypt(bin_msg)
+            bin_msg = unpad(self.de_cipher.decrypt(bin_msg), AES.block_size)
 
         # decompress the message
         if header.compression > 0:
@@ -113,12 +125,13 @@ class MSG_Frame():
         elif check_type == 'sha512':
             data_check = hashlib.sha512(data).hexdigest()
         else:
-            raise ValueError(f'Invalid checksum type: {check_type}')
+            data_check = None
         return data_check
     
     @staticmethod
     def check_checksum(check_type:str, data:bytes, check:str) -> None:
         data_check = MSG_Frame.get_checksum(data, check_type)
+        if data_check is None:
+            return
         if data_check != check:
             raise ChecksumError('Invalid checksum')
-        
