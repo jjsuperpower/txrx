@@ -6,8 +6,9 @@ HOST = '0.0.0.0'
 server = Server(HOST, PORT, crypt_key='test')
 server.start()
 server.wait_for_connection()
+server.wait_for_connection()
 
-client = server.get_clients()[0]
+client1, client2 = server.get_clients()
 
 # while(1):
 #     # receive msg from client
@@ -24,11 +25,10 @@ client = server.get_clients()[0]
 import cv2
 import numpy as np
 
-while(1):
-    # receive msg from client
-    frame = server.recv(client)
+cap = cv2.VideoCapture(0)
 
-    # display frame
-    cv2.imshow('frame', frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+while(1):
+    # send msg to server
+    ret, frame = cap.read()
+    server.send(client1, frame)
+    server.send(client2, frame)
