@@ -48,15 +48,24 @@ class Connection():
 
         for _ in range(self.max_retry):
 
-            connection.sendall(cmd_header)
-            connection.sendall(msg.bin_header)
-            connection.sendall(msg.bin_msg)
-            ack = connection.recv(ACK_LEN)
+            try:
+                connection.sendall(cmd_header)
+                connection.sendall(msg.bin_header)
+                connection.sendall(msg.bin_msg)
+                ack = connection.recv(ACK_LEN)
 
-            if ack != Status.OK.value:
-                logging.error('Error sending message')
-            else:
-                break
+                if ack != Status.OK.value:
+                    logging.error('Error sending message')
+                else:
+                    break
+
+            except ConnectionError as e:
+                logging.error(f'Connection Error, clould not send message: {e}')
+                continue
+
+            except Exception as e:
+                logging.error(f'Error sending message: {e}')
+                raise e
         
         if ack != Status.OK.value:
             logging.error('Connection Error, clould not send message')
@@ -93,28 +102,38 @@ class Connection():
     def _recv(self, connection:socket.socket) -> MSG_Frame:
         msg = None
         for _ in range(self.max_retry):
-
-            cmd_header = connection.recv(CMD_LEN)
-            cmd, header_len = unpack(PACKING_FORMAT, cmd_header)
-
-            if cmd != MSG_COMMAND:
-                logging.error('Invalid command header')
-                raise ValueError('Invalid command header')
-            
-            rx_msg = MSG_Frame(None, crypt_key=self.crypt_key)
-
-            rx_msg.bin_header_len = header_len
-            rx_msg.bin_header = connection.recv(header_len)
-
-            header = rx_msg.unpack_header()
-            rx_msg.bin_msg = self._recv_chunks(connection, header.data_len)
-
             try:
+                cmd_header = connection.recv(CMD_LEN)
+                cmd, header_len = unpack(PACKING_FORMAT, cmd_header)
+
+                if cmd != MSG_COMMAND:
+                    logging.error('Invalid command header')
+                    raise ValueError('Invalid command header')
+                
+                rx_msg = MSG_Frame(None, crypt_key=self.crypt_key)
+
+                rx_msg.bin_header_len = header_len
+                rx_msg.bin_header = connection.recv(header_len)
+
+                header = rx_msg.unpack_header()
+                rx_msg.bin_msg = self._recv_chunks(connection, header.data_len)
+
+            
                 msg = rx_msg.unpack()
 
             except ChecksumError as e:
                 logging.error(f'Checksum error: {e}')
                 connection.sendall(Status.OK.value)
+                continue
+        
+            except ValueError as e:
+                logging.error(f'Value error: {e}')
+                connection.sendall(Status.ERROR.value)
+                continue
+
+            except ConnectionError as e:
+                logging.error(f'Connection error: {e}')
+                connection.sendall(Status.ERROR.value)
                 continue
 
             except Exception as e:
