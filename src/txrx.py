@@ -17,13 +17,13 @@ class Connection():
     def __init__(self, 
                  host:str, 
                  port:int, 
-                 max_retry:int=5, 
+                 max_retry:int=25, 
                  protocol:str='tcp', 
                  checksum:str='crc32',
                  compression:int=0, 
                  auto_reconnect:bool=False,
                  crypt_key:str=None, 
-                 _recv_chunk_size:int=4096):
+                 _recv_chunk_size:int=1024):
         self.host = host
         self.port = port
         
@@ -63,7 +63,8 @@ class Connection():
                     break
 
             except ConnectionError as e:
-                logging.error(f'Connection Error, clould not send message: {e}')
+                logging.error(f'Connection Error, could not send message: {e}')
+                sleep(0.2)
                 continue
 
             except Exception as e:
@@ -71,7 +72,7 @@ class Connection():
                 raise e
         
         if ack != Status.OK.value:
-            logging.error('Connection Error, clould not send message')
+            logging.error('Connection Error, could not send message')
             raise ConnectionError('Error sending message')
         
         logging.info(f'Sent message to {connection.getpeername()}')
@@ -126,7 +127,7 @@ class Connection():
 
             except ChecksumError as e:
                 logging.error(f'Checksum error: {e}')
-                connection.sendall(Status.OK.value)
+                connection.sendall(Status.ERROR.value)
                 continue
         
             except ValueError as e:
