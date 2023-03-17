@@ -46,6 +46,9 @@ class Connection():
 
         cmd_header = pack(PACKING_FORMAT, MSG_COMMAND, msg.bin_header_len)
 
+
+        ack = None
+
         for _ in range(self.max_retry):
 
             try:
