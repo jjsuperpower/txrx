@@ -173,7 +173,7 @@ class Server(Connection):
             connection, client_address = self.socket.accept()
             connection.settimeout(5)
             connection.setblocking(True)
-            self.clients[str(client_address)] = connection
+            self.clients[str(client_address[0])] = connection
             logging.info(f'Connection from {client_address}')
 
     def send(self, addr:str, msg:Any):
